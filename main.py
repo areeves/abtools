@@ -19,6 +19,9 @@ base = Path(os.environ.get('LOAD_AB_BASE', '~/Audiobooks')).expanduser()
 print(f"Searching in {base}")
 
 terms = sys.argv[1:]
+if not terms:
+    print('At least one search term argument is required.')
+    sys.exit(1)
 print(f"Search terms: {terms}")
 
 pattern = re.compile(".*".join(map(re.escape, terms)))
