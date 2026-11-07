@@ -23,7 +23,7 @@ print(f"Search terms: {terms}")
 
 pattern = re.compile(".*".join(map(re.escape, terms)))
 
-matches = [p for p in base.glob("**/*.*") if pattern.search(str(p.relative_to(base)))]
+matches = [p for p in base.glob("**/*.*") if pattern.search(str(p.relative_to(base))) and p.is_file()]
 
 if not matches:
     print("No matches")
@@ -35,7 +35,7 @@ if len(matches) > 1:
     print(f"Must match exactly one file, got {len(matches)}")
     sys.exit(1)
 
-to_remove = [p for p in device.glob('**/*.*')]
+to_remove = [p for p in device.glob('**/*.*') if p.is_file()]
 if to_remove:
     print('To Remove:')
     for p in to_remove:
@@ -48,6 +48,7 @@ def confirm(prompt="Are you sure?"):
         print()
         return False
 if not confirm():
+    print('Aborted.')
     sys.exit(0)
 
 for d in to_remove:
