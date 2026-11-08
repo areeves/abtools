@@ -50,6 +50,13 @@ def check_space(device, matches, to_remove):
     if space < 10 * 1024 * 1024:
         print(f'WARN: only {space / 1e6:.1f} MB would be free after the copy; it may fail.')
 
+def check_paths(base, device):
+    device, base = device.resolve(), base.resolve()
+    if device == base or device in base.parents or base in device.parents:
+        raise AbtoolError(f"{device} and {base} overlap; refusing to delete.")
+    if device.stat().st_dev == base.stat().st_dev:
+        raise AbtoolError(f"{device} is on the same filesystem as the library; not a separate device.")
+
 def confirm(prompt="Are you sure?"):
     try:
         return input(f"{prompt} [y/N]: ").strip().lower() in ("y", "yes")
@@ -74,6 +81,7 @@ def main(argv=None):
         print(f"Device: {device}")
         base = get_base()
         print(f"Searching in {base}")
+        check_paths(base, device)
         matches = get_matches(base, args.terms)
         print("Matches:")
         for m in matches:
