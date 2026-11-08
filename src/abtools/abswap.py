@@ -3,9 +3,18 @@ from pathlib import Path
 import re
 import shutil
 import sys
+import argparse
 
 class AbtoolError(Exception):
     """A problem the user can fix; reported without a traceback."""
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(prog="abswap", description="Clear a device and copy one audiobook onto it.")
+    parser.add_argument("terms", nargs="+", help="search terms, matched in order")
+    parser.add_argument("-n", "--dry-run", action="store_true", help="show what would happen; change nothing")
+    # parser.add_argument("-i", "--ignore-case", action="store_true", help="case-insensitive matching")
+    # parser.add_argument("-y", "--yes", action="store_true", help="skip the confirmation prompt")
+    return parser.parse_args(argv)
 
 def get_device():
     devices = os.environ.get('LOAD_AB_DEVICES', '/cygdrive/j/Audible:/cygdrive/k/Audible')
@@ -19,12 +28,6 @@ def get_device():
 
 def get_base():
     return Path(os.environ.get('LOAD_AB_BASE', '~/Audiobooks')).expanduser()
-
-def get_terms():
-    terms = sys.argv[1:]
-    if not terms:
-        raise AbtoolError('At least one search term argument is required.')
-    return terms
 
 def get_matches(base, terms):
     pattern = re.compile(".*".join(map(re.escape, terms)))
@@ -64,15 +67,14 @@ def do_copy(src, device):
     shutil.copy(src, device)
     print("Done.")
 
-def main():
+def main(argv=None):
+    args = parse_args(argv)
     try:
         device = get_device()
         print(f"Device: {device}")
         base = get_base()
         print(f"Searching in {base}")
-        terms = get_terms()
-        print(f"Search terms: {terms}")
-        matches = get_matches(base, terms)
+        matches = get_matches(base, args.terms)
         print("Matches:")
         for m in matches:
             print(f"  {m}")
@@ -84,8 +86,11 @@ def main():
             for p in to_remove:
                 print(f"  {p}")
         check_space(device, matches, to_remove)
-        if not confirm():
-            print('Aborted.')
+        if args.dry_run:
+            print("Dry run: nothing changed.")
+            return 0
+        if not (args.yes or confirm()):
+            print("Aborted.")
             return 0
         do_remove(to_remove)
         do_copy(matches[0], device)
