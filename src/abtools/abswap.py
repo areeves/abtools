@@ -13,7 +13,7 @@ def parse_args(argv=None):
     parser.add_argument("terms", nargs="+", help="search terms, matched in order")
     parser.add_argument("-n", "--dry-run", action="store_true", help="show what would happen; change nothing")
     # parser.add_argument("-i", "--ignore-case", action="store_true", help="case-insensitive matching")
-    # parser.add_argument("-y", "--yes", action="store_true", help="skip the confirmation prompt")
+    parser.add_argument("-y", "--yes", action="store_true", help="skip the confirmation prompt")
     return parser.parse_args(argv)
 
 def get_device():
