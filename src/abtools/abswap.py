@@ -4,14 +4,16 @@ import re
 import shutil
 import sys
 
+class AbtoolError(Exception):
+    """A problem the user can fix; reported without a traceback."""
+
 def get_device():
     devices = os.environ.get('LOAD_AB_DEVICES', '/cygdrive/j/Audible:/cygdrive/k/Audible')
     devices = [Path(p) for p in devices.split(':')]
     devices = [d for d in devices if d.is_dir()]
     
     if len(devices) != 1:
-        print(f"Exactly one device expected, found {len(devices)}: {devices}")
-        sys.exit(1)
+        raise AbtoolError(f"Exactly one device expected, found {len(devices)}: {devices}")
     
     return devices[0]
 
@@ -21,8 +23,7 @@ def get_base():
 def get_terms():
     terms = sys.argv[1:]
     if not terms:
-        print('At least one search term argument is required.')
-        sys.exit(1)
+        raise AbtoolError('At least one search term argument is required.')
     return terms
 
 def get_matches(base, terms):
@@ -31,8 +32,7 @@ def get_matches(base, terms):
     matches = [p for p in base.glob("**/*.*") if pattern.search(str(p.relative_to(base))) and p.is_file()]
     
     if not matches:
-        print("No matches")
-        sys.exit(1)
+        raise AbtoolError("No matches")
     return matches
 
 def get_removals(device):
@@ -43,8 +43,7 @@ def check_space(device, matches, to_remove):
     space += sum(f.stat().st_size for f in to_remove)
     space -= sum(f.stat().st_size for f in matches)
     if space < 0:
-        print('Not enough free space on device.')
-        sys.exit(1)
+        raise AbtoolError('Not enough free space on device.')
     if space < 10 * 1024 * 1024:
         print(f'WARN: only {space / 1e6:.1f} MB would be free after the copy; it may fail.')
 
@@ -66,30 +65,35 @@ def do_copy(src, device):
     print("Done.")
 
 def main():
-    device = get_device()
-    print(f"Device: {device}")
-    base = get_base()
-    print(f"Searching in {base}")
-    terms = get_terms()
-    print(f"Search terms: {terms}")
-    matches = get_matches(base, terms)
-    print("Matches:")
-    for m in matches:
-        print(f"  {m}")
-    if len(matches) > 1:
-        print(f"Must match exactly one file, got {len(matches)}")
-        sys.exit(1)
-    to_remove = get_removals(device)
-    if to_remove:
-        print('To Remove:')
-        for p in to_remove:
-            print(f"  {p}")
-    check_space(device, matches, to_remove)
-    if not confirm():
-        print('Aborted.')
-        sys.exit(0)
-    do_remove(to_remove)
-    do_copy(matches[0], device)
+    try:
+        device = get_device()
+        print(f"Device: {device}")
+        base = get_base()
+        print(f"Searching in {base}")
+        terms = get_terms()
+        print(f"Search terms: {terms}")
+        matches = get_matches(base, terms)
+        print("Matches:")
+        for m in matches:
+            print(f"  {m}")
+        if len(matches) > 1:
+            print(f"Must match exactly one file, got {len(matches)}")
+            return 1
+        to_remove = get_removals(device)
+        if to_remove:
+            print('To Remove:')
+            for p in to_remove:
+                print(f"  {p}")
+        check_space(device, matches, to_remove)
+        if not confirm():
+            print('Aborted.')
+            return 0
+        do_remove(to_remove)
+        do_copy(matches[0], device)
+    except AbtoolError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    return 0
 
 if __name__ == "__main__":
     main()
