@@ -44,6 +44,15 @@ if to_remove:
     for p in to_remove:
         print(f"  {p}")
 
+space = shutil.disk_usage(device).free
+space += sum(f.stat().st_size for f in to_remove)
+space -= sum(f.stat().st_size for f in matches)
+if space < 0:
+    print('Not enough free space on device.')
+    sys.exit(1)
+if space < 10 * 1024 * 1024:
+    print(f'WARN: only {space / 1e6:.1f} MB would be free after the copy; it may fail.')
+
 def confirm(prompt="Are you sure?"):
     try:
         return input(f"{prompt} [y/N]: ").strip().lower() in ("y", "yes")
