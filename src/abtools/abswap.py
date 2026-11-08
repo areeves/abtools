@@ -77,8 +77,7 @@ def main():
         for m in matches:
             print(f"  {m}")
         if len(matches) > 1:
-            print(f"Must match exactly one file, got {len(matches)}")
-            return 1
+            raise AbtoolError(f"Must match exactly one file, got {len(matches)}")
         to_remove = get_removals(device)
         if to_remove:
             print('To Remove:')
@@ -96,5 +95,5 @@ def main():
     return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
 
