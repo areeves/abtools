@@ -70,8 +70,20 @@ def do_remove(to_remove):
         d.unlink()
 
 def do_copy(src, device):
+    dest = device / src.name
     print(f"Copying {src}")
-    shutil.copy(src, device)
+    try:
+        shutil.copyfile(src, dest)
+        if dest.stat().st_size != src.stat().st_size:
+            raise OSError(f"size mismatch: wrote {dest.stat().st_size} of {src.stat().st_size} bytes")
+    except BaseException:
+        # Also covers Ctrl-C. Remove the partial file, but never let a cleanup
+        # failure hide the original error.
+        try:
+            dest.unlink(missing_ok=True)
+        except OSError as cleanup_error:
+            print(f"WARN: could not remove partial file {dest}: {cleanup_error}", file=sys.stderr)
+        raise
     print("Done.")
 
 def main(argv=None):
@@ -100,8 +112,16 @@ def main(argv=None):
         if not (args.yes or confirm()):
             print("Aborted.")
             return 0
-        do_remove(to_remove)
-        do_copy(matches[0], device)
+        try:
+            do_remove(to_remove)
+        except OSError as e:
+            raise AbtoolError(f"Failed while clearing the device: {e}. "
+                              "The device may be partly cleared; nothing was copied.") from e
+        try:
+            do_copy(matches[0], device)
+        except OSError as e:
+            raise AbtoolError(f"Copy failed: {e}. The device was cleared, "
+                              "and the audiobook was not copied.") from e
     except AbtoolError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
