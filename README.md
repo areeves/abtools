@@ -36,7 +36,9 @@ abswap TERM [TERM ...]
 4. List every file currently on the device and check there is enough free space
    for the copy once those files are removed.
 5. Ask for confirmation (`[y/N]`).
-6. Delete every file on the device, then copy the audiobook onto it.
+6. Delete every file on the device, then copy the audiobook onto it. When
+   run in a terminal, a progress bar shows percentage, size, speed and time
+   remaining; the copy is flushed to the device before `Done.` is printed.
 
 > **Warning:** `abswap` deletes *all* files found anywhere under the device
 > directory (recursively), not just old audiobooks. Only point it at a

@@ -3,6 +3,7 @@ from pathlib import Path
 import re
 import shutil
 import sys
+import time
 import argparse
 
 class AbtoolError(Exception):
@@ -69,11 +70,64 @@ def do_remove(to_remove):
         print(f"Removing {d}")
         d.unlink()
 
+CHUNK_SIZE = 1024 * 1024
+BAR_WIDTH = 24
+
+def human(n):
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1000 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1000
+
+def draw_progress(copied, total, elapsed):
+    frac = copied / total if total else 1
+    filled = int(BAR_WIDTH * frac)
+    rate = copied / elapsed if elapsed > 0 else 0
+    eta = (total - copied) / rate if rate else 0
+    line = (f"[{'#' * filled}{'-' * (BAR_WIDTH - filled)}] {frac:4.0%}  "
+            f"{human(copied)}/{human(total)}  {human(rate)}/s  "
+            f"ETA {int(eta // 60):02d}:{int(eta % 60):02d}")
+    sys.stdout.write("\r" + line.ljust(78))
+    sys.stdout.flush()
+
+def copy_with_progress(src, dest, show=None):
+    """Copy src to dest in chunks, drawing a progress bar when show is true.
+
+    By default the bar is shown only when stdout is a terminal.
+    """
+    if show is None:
+        show = sys.stdout.isatty()
+    total = src.stat().st_size
+    copied = 0
+    start = last_draw = time.monotonic()
+    try:
+        with open(src, "rb") as fin, open(dest, "wb") as fout:
+            while True:
+                chunk = fin.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                fout.write(chunk)
+                copied += len(chunk)
+                now = time.monotonic()
+                if show and now - last_draw >= 0.1:
+                    draw_progress(copied, total, now - start)
+                    last_draw = now
+            if show:
+                draw_progress(copied, total, time.monotonic() - start)
+                sys.stdout.write("\nSyncing to device...")
+                sys.stdout.flush()
+            # Flush to the device so "done" really means done, not "in the OS cache".
+            fout.flush()
+            os.fsync(fout.fileno())
+    finally:
+        if show:
+            print()
+
 def do_copy(src, device):
     dest = device / src.name
     print(f"Copying {src}")
     try:
-        shutil.copyfile(src, dest)
+        copy_with_progress(src, dest)
         if dest.stat().st_size != src.stat().st_size:
             raise OSError(f"size mismatch: wrote {dest.stat().st_size} of {src.stat().st_size} bytes")
     except BaseException:
