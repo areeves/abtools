@@ -10,5 +10,12 @@ readme = "README.md"
 requires-python = ">=3.8"
 dependencies = []
 
+[project.optional-dependencies]
+test = ["pytest"]
+
 [project.scripts]
 abswap = "abtools.abswap:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

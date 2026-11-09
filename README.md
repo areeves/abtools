@@ -68,6 +68,20 @@ abswap Project Hail Mary
 match, not exactly one device, or not enough free space. Answering anything
 other than `y` or `yes` at the prompt aborts without touching the device.
 
+## Development
+
+Install the test dependency and run the suite:
+
+```
+pip install -e ".[test]"
+pytest
+```
+
+The tests use temporary directories only and never touch a real device or
+your audiobook library. They don't need a second physical filesystem: the
+same-filesystem guard is stubbed in the end-to-end tests and tested on its
+own with a faked `st_dev`.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
