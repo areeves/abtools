@@ -85,11 +85,11 @@ def test_missing_search_term_is_a_usage_error():
 def test_copy_failure_is_reported_and_leaves_no_partial_file(env, monkeypatch, capsys):
     _, device = env
 
-    def failing(src, dest, show=None):
+    def failing(src, dest, **kwargs):
         dest.write_bytes(b"partial")
         raise OSError("disk full")
 
-    monkeypatch.setattr(abswap, "copy_with_progress", failing)
+    monkeypatch.setattr(abswap, "copy_file", failing)
     assert abswap.main(["-y", "Dune"]) == 1
     err = capsys.readouterr().err
     assert "Copy failed: disk full" in err
@@ -124,3 +124,21 @@ def test_main_refuses_a_device_that_contains_the_library(library, monkeypatch, c
     assert abswap.main(["-y", "Dune"]) == 1
     assert "overlap" in capsys.readouterr().err
     assert (library / BOOK).exists()
+
+
+# --- the bar is only used on a terminal -----------------------------------
+
+@pytest.mark.parametrize("is_tty, expect_bar", [(True, True), (False, False)])
+def test_progress_bar_only_when_stdout_is_a_terminal(env, monkeypatch, is_tty, expect_bar):
+    seen = []
+    real_do_copy = abswap.do_copy
+
+    def spy(src, device, progress=None):
+        seen.append(progress)
+        return real_do_copy(src, device)   # copy without drawing
+
+    monkeypatch.setattr(abswap, "do_copy", spy)
+    monkeypatch.setattr(abswap.sys.stdout, "isatty", lambda: is_tty)
+    assert abswap.main(["-y", "Dune"]) == 0
+    assert len(seen) == 1
+    assert (seen[0] is not None) is expect_bar
