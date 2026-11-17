@@ -14,10 +14,12 @@ def library(tmp_path):
 
 @pytest.fixture
 def device(tmp_path):
-    """A device directory holding one old file that abswap should clear."""
+    """A device root with every configured folder, holding one old file that
+    abswap should clear (Audiobooks/old.mp3)."""
     dev = tmp_path / "device"
-    dev.mkdir()
-    (dev / "old.mp3").write_bytes(b"o" * 100)
+    for folder in abswap.SUBFOLDERS:
+        (dev / folder).mkdir(parents=True)
+    (dev / "Audiobooks" / "old.mp3").write_bytes(b"o" * 100)
     return dev
 
 
