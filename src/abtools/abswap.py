@@ -10,6 +10,17 @@ from abtools.progress import ProgressBar
 class AbtoolError(Exception):
     """A problem the user can fix; reported without a traceback."""
 
+# Device folder -> audiobook file extensions stored in it. A book is copied into
+# the folder whose extensions include its own, and these are the only folders
+# abswap ever clears. Extensions are lowercase; matching ignores case.
+SUBFOLDERS = {
+    "Audible": (".aax",),
+    "Audiobooks": (".mp3", ".m4a", ".m4b"),
+}
+EXTENSION_SUBFOLDER = {ext: folder for folder, exts in SUBFOLDERS.items() for ext in exts}
+
+DEFAULT_DEVICES = "/cygdrive/j:/cygdrive/k"
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(prog="abswap", description="Clear a device and copy one audiobook onto it.")
     parser.add_argument("terms", nargs="+", help="search terms, matched in order")
@@ -19,14 +30,40 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 def get_device():
-    devices = os.environ.get('LOAD_AB_DEVICES', '/cygdrive/j/Audible:/cygdrive/k/Audible')
-    devices = [Path(p) for p in devices.split(':')]
-    devices = [d for d in devices if d.is_dir()]
-    
+    """Return the one connected device root.
+
+    LOAD_AB_DEVICES is a colon-separated list of candidate device roots. A root
+    counts as a connected device only if at least one of the SUBFOLDERS exists
+    on it, so an unrelated drive at the same path isn't mistaken for a player.
+    """
+    entries = [Path(p) for p in os.environ.get('LOAD_AB_DEVICES', DEFAULT_DEVICES).split(':') if p]
+    for entry in entries:
+        if entry.name in SUBFOLDERS:
+            raise AbtoolError(f"LOAD_AB_DEVICES entry {entry} ends in '{entry.name}'. "
+                              "List the device root instead, the folder that contains "
+                              f"{', '.join(SUBFOLDERS)}.")
+    devices = [d for d in entries if any((d / folder).is_dir() for folder in SUBFOLDERS)]
+
     if len(devices) != 1:
         raise AbtoolError(f"Exactly one device expected, found {len(devices)}: {devices}")
-    
+
     return devices[0]
+
+def check_subfolders(device):
+    """Every configured folder must already exist; abswap never creates them."""
+    missing = [folder for folder in SUBFOLDERS if not (device / folder).is_dir()]
+    if missing:
+        raise AbtoolError(f"{device} is missing the folder(s) {', '.join(missing)}; "
+                          "something is wrong with the device. Nothing was changed.")
+
+def get_subfolder(path):
+    """The device folder a book belongs in, chosen by its file extension."""
+    folder = EXTENSION_SUBFOLDER.get(path.suffix.lower())
+    if folder is None:
+        raise AbtoolError(f"Unsupported file type {path.suffix or '(no extension)'} for {path.name}; "
+                          f"supported: {', '.join(sorted(EXTENSION_SUBFOLDER))}. "
+                          "Add a search term to match the audiobook file itself.")
+    return folder
 
 def get_base():
     return Path(os.environ.get('LOAD_AB_BASE', '~/Audiobooks')).expanduser()
@@ -41,7 +78,11 @@ def get_matches(base, terms):
     return matches
 
 def get_removals(device):
-    return [p for p in device.glob('**/*.*') if p.is_file()]
+    """Every file under the configured folders, and nothing outside them."""
+    removals = []
+    for folder in SUBFOLDERS:
+        removals.extend(sorted(p for p in (device / folder).rglob('*') if p.is_file()))
+    return removals
 
 def check_space(device, matches, to_remove):
     space = shutil.disk_usage(device).free
@@ -127,6 +168,7 @@ def main(argv=None):
     try:
         device = get_device()
         print(f"Device: {device}")
+        check_subfolders(device)
         base = get_base()
         print(f"Searching in {base}")
         check_paths(base, device)
@@ -136,6 +178,8 @@ def main(argv=None):
             print(f"  {m}")
         if len(matches) > 1:
             raise AbtoolError(f"Must match exactly one file, got {len(matches)}")
+        dest_dir = device / get_subfolder(matches[0])
+        print(f"Destination: {dest_dir}")
         to_remove = get_removals(device)
         if to_remove:
             print('To Remove:')
@@ -154,7 +198,7 @@ def main(argv=None):
             raise AbtoolError(f"Failed while clearing the device: {e}. "
                               "The device may be partly cleared; nothing was copied.") from e
         try:
-            do_copy(matches[0], device, ProgressBar() if sys.stdout.isatty() else None)
+            do_copy(matches[0], dest_dir, ProgressBar() if sys.stdout.isatty() else None)
         except OSError as e:
             raise AbtoolError(f"Copy failed: {e}. The device was cleared, "
                               "and the audiobook was not copied.") from e

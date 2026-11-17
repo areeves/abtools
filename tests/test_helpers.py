@@ -31,11 +31,44 @@ def test_parse_args_requires_a_term(capsys):
     assert "terms" in capsys.readouterr().err
 
 
-# --- get_device / get_base ------------------------------------------------
+# --- the folder mapping ---------------------------------------------------
 
-def test_get_device_returns_the_one_existing_directory(monkeypatch, tmp_path):
-    real = tmp_path / "real"
-    real.mkdir()
+def test_mapping_is_consistent():
+    # No extension may be claimed by two folders (the derived lookup would
+    # silently keep only one), and extensions are stored lowercase with a dot.
+    all_exts = [ext for exts in abswap.SUBFOLDERS.values() for ext in exts]
+    assert len(abswap.EXTENSION_SUBFOLDER) == len(all_exts)
+    assert all(ext.startswith(".") and ext == ext.lower() for ext in all_exts)
+
+
+@pytest.mark.parametrize("name, folder", [
+    ("Book.aax", "Audible"), ("Book.AAX", "Audible"),
+    ("Book.mp3", "Audiobooks"), ("Book.m4a", "Audiobooks"),
+    ("Book.m4b", "Audiobooks"), ("Book.M4B", "Audiobooks"),
+    ("Dune Messiah (Unabridged).m4b", "Audiobooks"),
+])
+def test_get_subfolder(name, folder):
+    assert abswap.get_subfolder(Path("lib") / name) == folder
+
+
+@pytest.mark.parametrize("name", ["cover.jpg", "notes.pdf", "README", "Book.aax.bak"])
+def test_get_subfolder_rejects_unsupported_files(name):
+    with pytest.raises(AbtoolError, match="Unsupported file type"):
+        abswap.get_subfolder(Path("lib") / name)
+
+
+# --- get_device / check_subfolders / get_base -----------------------------
+
+def make_device(path, folders=None):
+    """Create a device root containing the given (default: all) folders."""
+    path.mkdir(parents=True, exist_ok=True)
+    for folder in (abswap.SUBFOLDERS if folders is None else folders):
+        (path / folder).mkdir()
+    return path
+
+
+def test_get_device_returns_the_one_existing_device(monkeypatch, tmp_path):
+    real = make_device(tmp_path / "real")
     missing = tmp_path / "missing"
     monkeypatch.setenv("LOAD_AB_DEVICES", f"{missing}:{real}")
     assert abswap.get_device() == real
@@ -48,12 +81,58 @@ def test_get_device_none_exist(monkeypatch, tmp_path):
 
 
 def test_get_device_more_than_one_exists(monkeypatch, tmp_path):
-    a, b = tmp_path / "a", tmp_path / "b"
-    a.mkdir()
-    b.mkdir()
+    a, b = make_device(tmp_path / "a"), make_device(tmp_path / "b")
     monkeypatch.setenv("LOAD_AB_DEVICES", f"{a}:{b}")
     with pytest.raises(AbtoolError, match="found 2"):
         abswap.get_device()
+
+
+def test_get_device_ignores_a_root_without_any_configured_folder(monkeypatch, tmp_path):
+    """A stray drive at one of the paths must not be mistaken for a player."""
+    stray = tmp_path / "stray"
+    stray.mkdir()
+    player = make_device(tmp_path / "player")
+    monkeypatch.setenv("LOAD_AB_DEVICES", f"{stray}:{player}")
+    assert abswap.get_device() == player
+
+
+def test_get_device_accepts_a_root_with_only_some_folders(monkeypatch, tmp_path):
+    """Partly set-up devices are found here; check_subfolders then rejects them."""
+    partial = make_device(tmp_path / "partial", folders=["Audible"])
+    monkeypatch.setenv("LOAD_AB_DEVICES", str(partial))
+    assert abswap.get_device() == partial
+
+
+def test_get_device_skips_empty_entries(monkeypatch, tmp_path):
+    real = make_device(tmp_path / "real")
+    monkeypatch.setenv("LOAD_AB_DEVICES", f":{real}:")
+    assert abswap.get_device() == real
+
+
+@pytest.mark.parametrize("folder", list(abswap.SUBFOLDERS))
+def test_get_device_rejects_old_style_subfolder_entries(monkeypatch, tmp_path, folder):
+    root = make_device(tmp_path / "root")
+    monkeypatch.setenv("LOAD_AB_DEVICES", str(root / folder))
+    with pytest.raises(AbtoolError, match="device root"):
+        abswap.get_device()
+
+
+def test_check_subfolders_accepts_a_complete_device(tmp_path):
+    abswap.check_subfolders(make_device(tmp_path / "dev"))  # no error
+
+
+def test_check_subfolders_names_every_missing_folder(tmp_path):
+    dev = make_device(tmp_path / "dev", folders=[])
+    with pytest.raises(AbtoolError, match="Audible, Audiobooks"):
+        abswap.check_subfolders(dev)
+    assert list(dev.iterdir()) == []  # never creates them
+
+
+def test_check_subfolders_rejects_a_file_in_place_of_a_folder(tmp_path):
+    dev = make_device(tmp_path / "dev", folders=["Audiobooks"])
+    (dev / "Audible").write_bytes(b"not a folder")
+    with pytest.raises(AbtoolError, match="Audible"):
+        abswap.check_subfolders(dev)
 
 
 def test_get_base_expands_user(monkeypatch):
@@ -108,11 +187,36 @@ def test_match_is_against_relative_path_only(shelf):
 
 # --- get_removals / do_remove --------------------------------------------
 
-def test_removals_include_nested_files(tmp_path):
-    (tmp_path / "sub").mkdir()
-    (tmp_path / "a.mp3").write_bytes(b"1")
-    (tmp_path / "sub" / "b.m4b").write_bytes(b"2")
-    assert names(abswap.get_removals(tmp_path), tmp_path) == ["a.mp3", "sub/b.m4b"]
+def test_removals_include_nested_files_in_every_folder(tmp_path):
+    dev = make_device(tmp_path / "dev")
+    (dev / "Audiobooks" / "sub").mkdir()
+    (dev / "Audiobooks" / "a.mp3").write_bytes(b"1")
+    (dev / "Audiobooks" / "sub" / "b.m4b").write_bytes(b"2")
+    (dev / "Audible" / "c.aax").write_bytes(b"3")
+    assert names(abswap.get_removals(dev), dev) == [
+        "Audible/c.aax", "Audiobooks/a.mp3", "Audiobooks/sub/b.m4b"]
+
+
+def test_removals_never_reach_outside_the_configured_folders(tmp_path):
+    dev = make_device(tmp_path / "dev")
+    (dev / "Other").mkdir()
+    (dev / "Other" / "keep.mp3").write_bytes(b"1")
+    (dev / "keep.m4b").write_bytes(b"2")
+    (dev / "Audiobooks" / "old.mp3").write_bytes(b"3")
+    assert names(abswap.get_removals(dev), dev) == ["Audiobooks/old.mp3"]
+
+
+def test_removals_include_any_file_not_just_ones_with_extensions(tmp_path):
+    dev = make_device(tmp_path / "dev")
+    (dev / "Audible" / "notes").write_bytes(b"1")
+    (dev / "Audible" / ".hidden").write_bytes(b"2")
+    assert names(abswap.get_removals(dev), dev) == ["Audible/.hidden", "Audible/notes"]
+
+
+def test_removals_ignore_directories(tmp_path):
+    dev = make_device(tmp_path / "dev")
+    (dev / "Audible" / "empty_dir").mkdir()
+    assert abswap.get_removals(dev) == []
 
 
 def test_do_remove_deletes_files(tmp_path, capsys):
